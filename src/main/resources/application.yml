@@ -1,0 +1,77 @@
+server:
+  port: 8100
+
+
+spring:
+
+  application:
+    name: product-integrator
+  integration:
+    channels:
+      requestChannel: {}
+      validationResponseChannel: {}
+      detailsResponseChannel: {}
+      eventResponseChannel: {}
+      errorChannel: {}
+    components:
+      # 1. POST Validation Request
+      - http-outbound-gateway:
+          input-channel: requestChannel
+          output-channel: validationResponseChannel
+          url: "http://legacy-system/api/validate"
+          http-method: POST
+          expected-response-type: "java.util.Map"
+          mapped-request-headers: "*"
+          extract-payload: true
+          request-factory:
+            headers:
+              Content-Type: "application/json"
+          body-expression: >
+            {
+              "arg1": headers['arg1'],
+              "arg2": headers['arg2']
+            }
+
+      # 2. Route Validation Response
+      - router:
+          input-channel: validationResponseChannel
+          expression: "payload.result == 'valid' ? 'detailsRequestChannel' : 'errorChannel'"
+
+      # 3. GET Details Request
+      - http-outbound-gateway:
+          input-channel: detailsRequestChannel
+          output-channel: detailsResponseChannel
+          url: "http://legacy-system/api/details/{id}"
+          http-method: GET
+          expected-response-type: "java.util.Map"
+          uri-variables:
+            id: "headers['recordId']"
+
+      # 4. Transform Response (Field Mapping)
+      - transformer:
+          input-channel: detailsResponseChannel
+          output-channel: normalizedResponseChannel
+          expression: >
+            {
+              "standardField1": payload.legacyFieldA,
+              "standardField2": payload.legacyFieldB,
+              "additionalInfo": payload.extraDetails
+            }
+
+      # 5. POST Event Request
+      - http-outbound-gateway:
+          input-channel: normalizedResponseChannel
+          output-channel: eventResponseChannel
+          url: "http://legacy-system/api/event"
+          http-method: POST
+          expected-response-type: "java.lang.Void"
+          request-factory:
+            headers:
+              Content-Type: "application/json"
+          body-expression: >
+            {
+              "eventType": "NEW_EVENT",
+              "eventData": payload
+            }
+
+

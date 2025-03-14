@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:int="http://www.springframework.org/schema/integration"
+       xmlns:int-http="http://www.springframework.org/schema/integration/http"
+       xsi:schemaLocation="
+       http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/integration https://www.springframework.org/schema/integration/spring-integration.xsd
+       http://www.springframework.org/schema/integration/http https://www.springframework.org/schema/integration/http/spring-integration-http.xsd">
+
+    <int:channel id="requestChannel"/>
+    <int:channel id="validationResponseChannel"/>
+    <int:channel id="detailsResponseChannel"/>
+    <int:channel id="eventRequestChannel"/>
+    <int:channel id="eventResponseChannel"/>
+    <int:channel id="errorChannel"/>
+
+    <int-http:outbound-gateway id="validationGateway"
+                               request-channel="requestChannel"
+                               reply-channel="validationResponseChannel"
+                               url="http://localhost:8101/api/validate"
+                               http-method="POST"
+                               expected-response-type="java.util.Map"/>
+
+    <int:router input-channel="validationResponseChannel" expression="payload['result'] == 'valid' ? 'detailsRequestChannel' : 'errorChannel'"/>
+
+    <int-http:outbound-gateway id="detailsGateway"
+                               request-channel="detailsRequestChannel"
+                               reply-channel="detailsResponseChannel"
+                               url="http://localhost:8101/api/details/{id}"
+                               http-method="GET"
+                               expected-response-type="java.util.Map">
+        <int-http:uri-variable name="id" expression="headers['recordId']"/>
+    </int-http:outbound-gateway>
+
+    <int:header-enricher input-channel="detailsResponseChannel" output-channel="eventRequestChannel">
+        <int:header name="standardField1" expression="payload['legacyFieldA']"/>
+        <int:header name="standardField2" expression="payload['legacyFieldB']"/>
+        <int:header name="additionalInfo" expression="payload['extraDetails']"/>
+    </int:header-enricher>
+
+    <int-http:outbound-gateway id="eventGateway"
+                               request-channel="eventRequestChannel"
+                               reply-channel="eventResponseChannel"
+                               url="http://localhost:8101/api/event"
+                               http-method="POST"
+                               expected-response-type="java.lang.Void"/>
+
+    <int:service-activator input-channel="eventResponseChannel" output-channel="nullChannel">
+        <bean class="org.springframework.integration.handler.LoggingHandler">
+            <constructor-arg value="INFO"/>
+        </bean>
+    </int:service-activator>
+
+</beans>
